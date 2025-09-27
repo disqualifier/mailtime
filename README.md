@@ -4,7 +4,7 @@
   <img src="assets/icon.png" alt="mail time!" width="128" height="128">
 </div>
 
-A PyQt6-based IMAP email client designed for rapid usage of emails over IMAP, including temp services like hotmail007.
+A lightweight PyQt6-based email client built on Python 3.10+, designed for rapid email access via IMAP, perfect for managing multiple accounts and temporary email services.
 
 ## Features
 
@@ -114,4 +114,4 @@ mailtime/
 
 ## License
 
-This project is for educational and research purposes.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

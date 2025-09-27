@@ -1,0 +1,85 @@
+# Claude Code artifacts
+.claude/
+CLAUDE.md
+claude.md
+.claude_history
+.claude_session
+.claude_context
+
+# Python virtual environments
+venv/
+env/
+.env
+.venv
+ENV/
+env.bak/
+venv.bak/
+
+# Python cache and bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Application-specific files
+mail_client.log
+*.log
+.mailtime/
+config.json
+*.json
+*.cache
+
+# Test files
+test_modular.py
+test_*.py
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.old
+
+# Credentials and sensitive data
+*.key
+*.pem
+*.p12
+credentials.txt
+secrets.txt
+.env.local
+.env.production
