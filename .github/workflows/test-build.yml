@@ -3,6 +3,7 @@ name: Test Build
 on:
   push:
     branches: [ main, master, develop ]
+    tags-ignore: [ '**' ]
   pull_request:
     branches: [ main, master, develop ]
 

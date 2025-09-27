@@ -6,6 +6,10 @@ on:
       - 'v*'
   workflow_dispatch:
 
+permissions:
+  contents: write
+  packages: write
+
 jobs:
   build-windows:
     runs-on: windows-latest
@@ -25,6 +29,10 @@ jobs:
         pip install -r requirements.txt
         pip install pyinstaller
 
+    - name: Get version from tag
+      shell: bash
+      run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+
     - name: Build Windows executable
       run: |
         pyinstaller app.spec --clean --noconfirm
@@ -32,13 +40,13 @@ jobs:
     - name: Create release directory
       run: |
         mkdir release
-        copy dist\mailtime.exe release\
+        copy dist\mailtime.exe release\mailtime-${{ env.VERSION }}.exe
         copy README.md release\
         copy LICENSE release\
 
     - name: Create zip archive
       run: |
-        powershell Compress-Archive -Path release\* -DestinationPath mailtime-windows.zip
+        powershell Compress-Archive -Path release\* -DestinationPath mailtime-windows-${{ env.VERSION }}.zip
 
     - name: Upload Windows build
       uses: actions/upload-artifact@v4
@@ -46,7 +54,8 @@ jobs:
         name: mailtime-windows
         path: |
           release/
-          mailtime-windows.zip
+          mailtime-windows-${{ env.VERSION }}.zip
+          dist/mailtime.exe
 
   build-linux:
     runs-on: ubuntu-latest
@@ -77,16 +86,19 @@ jobs:
       run: |
         pyinstaller app.spec --clean --noconfirm
 
+    - name: Get version from tag
+      run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+
     - name: Create release directory
       run: |
         mkdir release
-        cp dist/mailtime release/
+        cp dist/mailtime release/mailtime-${{ env.VERSION }}
         cp README.md release/
         cp LICENSE release/
 
     - name: Create tar archive
       run: |
-        tar -czf mailtime-linux.tar.gz -C release .
+        tar -czf mailtime-linux-${{ env.VERSION }}.tar.gz -C release .
 
     - name: Upload Linux build
       uses: actions/upload-artifact@v4
@@ -94,7 +106,8 @@ jobs:
         name: mailtime-linux
         path: |
           release/
-          mailtime-linux.tar.gz
+          mailtime-linux-${{ env.VERSION }}.tar.gz
+          dist/mailtime
 
   create-release:
     needs: [build-windows, build-linux]
@@ -131,13 +144,19 @@ jobs:
           A lightweight PyQt6-based email client for rapid IMAP access.
 
           ### Downloads
-          - **Windows**: Download `mailtime-windows.zip`
-          - **Linux**: Download `mailtime-linux.tar.gz`
+
+          **Windows:**
+          - `mailtime-${{ env.TAG_NAME }}.exe` - Standalone executable
+          - `mailtime-windows-${{ env.TAG_NAME }}.zip` - Archive with executable + documentation
+
+          **Linux:**
+          - `mailtime-${{ env.TAG_NAME }}` - Standalone binary
+          - `mailtime-linux-${{ env.TAG_NAME }}.tar.gz` - Archive with binary + documentation
 
           ### Installation
           1. Download the appropriate file for your platform
-          2. Extract the archive
-          3. Run `mailtime.exe` (Windows) or `./mailtime` (Linux)
+          2. **Standalone**: Run directly (`mailtime.exe` or `./mailtime`)
+          3. **Archive**: Extract and run executable
 
           ### What's New
           - Check the commit history for changes since the last release
@@ -145,8 +164,10 @@ jobs:
           ---
           Built with GitHub Actions
         files: |
-          windows-build/mailtime-windows.zip
-          linux-build/mailtime-linux.tar.gz
+          windows-build/mailtime-windows-${{ env.TAG_NAME }}.zip
+          windows-build/release/mailtime-${{ env.TAG_NAME }}.exe
+          linux-build/mailtime-linux-${{ env.TAG_NAME }}.tar.gz
+          linux-build/release/mailtime-${{ env.TAG_NAME }}
         draft: false
         prerelease: false
       env:
