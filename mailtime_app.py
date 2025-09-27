@@ -9,9 +9,16 @@ from typing import Dict, Any
 from datetime import datetime
 
 # Add current directory to path for imports
-current_dir = Path(__file__).parent
-if str(current_dir) not in sys.path:
-    sys.path.insert(0, str(current_dir))
+# Handle both development and PyInstaller bundled environments
+if getattr(sys, 'frozen', False):
+    # PyInstaller bundle - modules are in sys._MEIPASS
+    application_path = Path(sys._MEIPASS)
+else:
+    # Development environment
+    application_path = Path(__file__).parent
+
+if str(application_path) not in sys.path:
+    sys.path.insert(0, str(application_path))
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
