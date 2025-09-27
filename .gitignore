@@ -40,7 +40,6 @@ wheels/
 
 # PyInstaller
 *.manifest
-*.spec
 
 # Application-specific files
 mail_client.log

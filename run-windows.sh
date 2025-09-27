@@ -85,5 +85,5 @@ else
     echo "Using Windows Python: $WINDOWS_PYTHON"
 
     # Run the application with Windows Python
-    "$WINDOWS_PYTHON" app.py
+    "$WINDOWS_PYTHON" mailtime_app.py
 fi

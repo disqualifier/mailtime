@@ -107,4 +107,4 @@ if [[ -n "$WSL_DISTRO_NAME" ]] || [[ "$OSTYPE" == "linux-gnu" && -z "$DISPLAY" ]
     echo "For GUI access, use Windows Python directly or set up X11 forwarding."
 fi
 
-$PYTHON app.py
+$PYTHON mailtime_app.py

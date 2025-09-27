@@ -53,7 +53,7 @@ pip install -r requirements.txt
 
 **Alternative:**
 ```bash
-python3 app.py
+python3 mailtime_app.py
 ```
 
 ### Build Executable
@@ -126,8 +126,7 @@ mailtime/
 │   ├── icon.png            # Application icon
 │   ├── icon.ico            # Windows icon
 │   └── mail.mp3            # Notification sound
-├── app.py                  # Main application (standalone)
-├── mailtime_app.py         # Main application (modular)
+├── mailtime_app.py         # Main application
 ├── widgets.py              # UI components
 ├── dialogs.py              # Dialog windows
 ├── utils.py                # Utility functions

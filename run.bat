@@ -73,7 +73,7 @@ if "%1"=="--help" (
 
 if "%1"=="" (
     echo Starting mail time! application...
-    %PYTHON% app.py
+    %PYTHON% mailtime_app.py
     goto :end
 )
 
