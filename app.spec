@@ -2,11 +2,11 @@
 
 
 a = Analysis(
-    ['mailtime_app.py'],
-    pathex=[],
+    ['mailtime_app.py', 'utils.py', 'workers.py', 'dialogs.py', 'widgets.py'],
+    pathex=['.'],
     binaries=[],
     datas=[('assets/icon.png', '.'), ('assets/mail.mp3', '.'), ('assets/fontawesome_icons', 'fontawesome_icons')],
-    hiddenimports=['aioimaplib', 'email', 'json', 'hashlib', 'PyQt6.QtSvg', 'utils', 'workers', 'dialogs', 'widgets'],
+    hiddenimports=['aioimaplib', 'email', 'json', 'hashlib', 'PyQt6.QtSvg'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
