@@ -1,0 +1,4 @@
+PyQt6==6.7.0
+aioimaplib==1.0.1
+beautifulsoup4==4.12.3
+pygame==2.5.2
