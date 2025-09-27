@@ -2,9 +2,9 @@
 
 <div align="center">
   <img src="assets/icon.png" alt="mail time!" width="128" height="128">
-</div>
 
-A lightweight PyQt6-based email client built on Python 3.10+, designed for rapid email access via IMAP, perfect for managing multiple accounts and temporary email services.
+  <p>A lightweight PyQt6-based email client built on Python 3.10+, designed for rapid email access via IMAP, perfect for managing multiple accounts and temporary email services.</p>
+</div>
 
 ## Features
 
@@ -19,14 +19,22 @@ A lightweight PyQt6-based email client built on Python 3.10+, designed for rapid
 
 ## Installation
 
-### Requirements
+### Option 1: Download Pre-built Executables (Recommended)
 
+Download the latest release from the [Releases page](../../releases):
+- **Windows**: Download `mailtime-windows.zip`
+- **Linux**: Download `mailtime-linux.tar.gz`
+
+Extract and run the executable directly - no Python installation required!
+
+### Option 2: Run from Source
+
+**Requirements:**
 - Python 3.10+
 - PyQt6
 - aioimaplib
 
-### Install Dependencies
-
+**Install Dependencies:**
 ```bash
 pip install -r requirements.txt
 ```
@@ -66,6 +74,24 @@ run.bat build
 ```
 
 The built executable will be in the `dist/` directory (`mailtime.exe` for Windows).
+
+## Development & Releases
+
+### Creating a Release
+
+1. **Push all code changes:**
+   ```bash
+   git add .
+   git commit -m "Your changes"
+   git push origin main
+   ```
+
+2. **Create and push release tag:**
+   ```bash
+   ./release.sh v1.0.0
+   ```
+
+This automatically triggers GitHub Actions to build Windows/Linux executables and create a release.
 
 ## Usage
 
@@ -109,6 +135,7 @@ mailtime/
 ├── run.sh                  # Linux/Mac runner
 ├── run.bat                 # Windows batch runner
 ├── run-windows.sh          # WSL Windows GUI runner
+├── release.sh              # Release creation script
 └── requirements.txt        # Dependencies
 ```
 
