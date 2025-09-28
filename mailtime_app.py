@@ -8,13 +8,11 @@ from pathlib import Path
 from typing import Dict, Any
 from datetime import datetime
 
-# Add current directory to path for imports
-# Handle both development and PyInstaller bundled environments
+__version__ = "1.0.0"
+
 if getattr(sys, 'frozen', False):
-    # PyInstaller bundle - modules are in sys._MEIPASS
     application_path = Path(sys._MEIPASS)
 else:
-    # Development environment
     application_path = Path(__file__).parent
 
 if str(application_path) not in sys.path:
@@ -23,15 +21,15 @@ if str(application_path) not in sys.path:
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QTabWidget, QPushButton, QListWidget, QListWidgetItem, QDialog,
-    QMessageBox, QSplitter, QLabel, QTextEdit
+    QMessageBox, QSplitter, QLabel, QTextEdit, QLineEdit
 )
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QIcon, QPixmap, QTextCursor
 from PyQt6.QtWidgets import QSizePolicy
 
 from utils import load_svg_icon, get_status_circle, get_resource_path
-from workers import FileIOWorker
-from dialogs import AccountDialog, SettingsDialog, EmailSearchDialog
+from workers import FileIOWorker, UpdateChecker
+from dialogs import AccountDialog, SettingsDialog, EmailSearchDialog, UpdateDialog
 from widgets import MailTab
 
 mailtime_dir = Path.home() / ".mailtime"
@@ -68,6 +66,8 @@ class MailClient(QMainWindow):
 
         self.setStyleSheet("* { outline: none; }")
 
+        QTimer.singleShot(2000, self._check_for_updates)
+
         log.info("Mail client initialized")
 
     def _setup_ui(self):
@@ -96,6 +96,7 @@ class MailClient(QMainWindow):
         self.tabs = QTabWidget()
         self.tabs.setTabsClosable(True)
         self.tabs.tabCloseRequested.connect(self.close_tab)
+        self.tabs.currentChanged.connect(self._on_tab_changed)
         self.tabs.setStyleSheet("""
             QTabWidget::pane {
                 border: 1px solid #3a3a3a;
@@ -229,6 +230,31 @@ class MailClient(QMainWindow):
         panel_header = QLabel("📧 Account Manager")
         panel_header.setStyleSheet("color: white; font-size: 14px; font-weight: bold; margin-bottom: 10px;")
         panel_layout.addWidget(panel_header)
+
+        self.email_search_bar = QLineEdit()
+        self.email_search_bar.setPlaceholderText("🔍 Search accounts...")
+        self.email_search_bar.setStyleSheet("""
+            QLineEdit {
+                background-color: #1a1a1a;
+                border: 1px solid #3a3a3a;
+                border-radius: 6px;
+                color: white;
+                padding: 8px 12px;
+                font-size: 13px;
+                margin-bottom: 5px;
+            }
+            QLineEdit:focus {
+                border: 2px solid #824ffb;
+                background-color: #242424;
+            }
+        """)
+
+        self.search_timer = QTimer()
+        self.search_timer.setSingleShot(True)
+        self.search_timer.timeout.connect(self._do_email_search)
+
+        self.email_search_bar.textChanged.connect(self._on_search_text_changed)
+        panel_layout.addWidget(self.email_search_bar)
 
         self.accounts_list = QListWidget()
         self.accounts_list.setStyleSheet("""
@@ -471,11 +497,11 @@ class MailClient(QMainWindow):
 
         layout = QVBoxLayout(dialog)
 
-        instructions = QLabel("Import Formats:\n• email:password\n• email:password:name\n• email:password:name:host:port\n\nFormats without host:port use default settings.\nOne account per line:")
+        instructions = QLabel("Import Formats:\n• email:password\n• email:password:name\n• email:password:host:port\n• email:password:name:host:port\n\nFormats without host:port use default settings.\nOne account per line:")
         layout.addWidget(instructions)
 
         text_edit = QTextEdit()
-        text_edit.setPlaceholderText("user@example.com:password123\nuser2@gmail.com:password456:Work Gmail\nuser3@company.com:password789:Company:imap.company.com:993")
+        text_edit.setPlaceholderText("user@example.com:password123\nuser2@gmail.com:password456:Work Gmail\nuser3@corporate.com:password789:imap.corporate.com:993\nuser4@company.com:password000:Company Mail:imap.company.com:993")
         layout.addWidget(text_edit)
 
         button_layout = QHBoxLayout()
@@ -559,7 +585,8 @@ class MailClient(QMainWindow):
                 else:
                     continue
 
-                    new_email = account['email'].lower()
+                # Check for duplicate accounts
+                new_email = account['email'].lower()
                 existing_emails = [acc.get('email', '').lower() for acc in self.config.get("accounts", [])]
                 if new_email in existing_emails:
                     log.info(f"Account {account['email']} already exists, ignoring duplicate")
@@ -726,9 +753,68 @@ class MailClient(QMainWindow):
                         self.tabs.setCurrentIndex(i)
                         break
 
+    def _clear_all_cache_files(self):
+        """Clear all email cache files from the mailtime directory"""
+        import hashlib
+        try:
+            mailtime_dir = Path.home() / ".mailtime"
+            if not mailtime_dir.exists():
+                return
+
+            # Clear cache files for existing accounts
+            for account in self.config.get("accounts", []):
+                email = account.get('email', '')
+                if email:
+                    safe_email = hashlib.md5(email.encode()).hexdigest()
+                    cache_file = mailtime_dir / f"{safe_email}_emails.json"
+                    if cache_file.exists():
+                        cache_file.unlink()
+                        log.info(f"Removed cache file for {email}")
+
+            # Also clear any orphaned cache files (emails that match the pattern)
+            for cache_file in mailtime_dir.glob("*_emails.json"):
+                if cache_file.exists():
+                    cache_file.unlink()
+                    log.info(f"Removed orphaned cache file: {cache_file.name}")
+
+        except Exception as e:
+            log.error(f"Error clearing cache files: {e}")
+
     def clear_all_accounts(self):
-        """Clear all accounts"""
-        pass
+        """Clear all accounts with confirmation"""
+        if not self.config["accounts"]:
+            QMessageBox.information(self, "No Accounts", "There are no accounts to clear.")
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Clear All Accounts",
+            f"Are you sure you want to remove all {len(self.config['accounts'])} email accounts?\n\nThis will:\n• Remove all account configurations\n• Close all open tabs\n• Clear all cached emails\n\nThis action cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            # Close all tabs first
+            while self.tabs.count() > 0:
+                self.tabs.removeTab(0)
+
+            # Clear all cache files for existing accounts
+            self._clear_all_cache_files()
+
+            # Clear all accounts from config
+            self.config["accounts"] = []
+
+            # Save empty config
+            self._save_config()
+
+            # Update accounts list
+            self._update_accounts_list()
+
+            # Clear tab status map
+            self.tab_status_map.clear()
+
+            log.info("All accounts cleared by user")
+            QMessageBox.information(self, "Accounts Cleared", "All email accounts and cached data have been removed.")
 
     def close_tab(self, index: int):
         """Close a mail tab"""
@@ -936,7 +1022,17 @@ class MailClient(QMainWindow):
         log.debug(f"update_tab_status called with status: {status}")
         index = self.tabs.indexOf(tab)
         if index >= 0:
-            account = self.config["accounts"][index]
+            tab_email = tab.account.get('email', '')
+            account = None
+            for acc in self.config["accounts"]:
+                if acc.get('email', '') == tab_email:
+                    account = acc
+                    break
+
+            if not account:
+                log.warning(f"Could not find account config for tab email: {tab_email}")
+                return
+
             tab_name = account.get("name", account.get("email", "Unknown"))
 
             if status == "cache":
@@ -958,6 +1054,83 @@ class MailClient(QMainWindow):
             if hasattr(self, 'accounts_list'):
                 self._update_accounts_list()
             log.debug(f"Updated tab status for {tab_name}: {status_text}")
+
+    def _check_for_updates(self):
+        """Check for application updates from GitHub releases"""
+        try:
+            repo_url = "https://api.github.com/repos/dsql/mailtime/releases/latest"
+
+            self.update_checker = UpdateChecker(__version__, repo_url)
+            self.update_checker.update_available.connect(self._on_update_available)
+            self.update_checker.no_update.connect(self._on_no_update)
+            self.update_checker.error.connect(self._on_update_error)
+            self.update_checker.finished.connect(lambda: setattr(self, 'update_checker', None))
+            self.update_checker.start()
+
+        except Exception as e:
+            log.error(f"Failed to start update check: {e}")
+
+    def _on_update_available(self, latest_version: str, download_url: str, release_notes: str):
+        """Handle when an update is available"""
+        log.info(f"Update available: {latest_version}")
+        try:
+            dialog = UpdateDialog(__version__, latest_version, download_url, release_notes, self)
+            dialog.exec()
+        except Exception as e:
+            log.error(f"Failed to show update dialog: {e}")
+
+    def _on_no_update(self):
+        """Handle when no update is available"""
+        log.debug("No updates available")
+
+    def _on_update_error(self, error_msg: str):
+        """Handle update check errors"""
+        log.warning(f"Update check failed: {error_msg}")
+
+    def _on_search_text_changed(self, text: str):
+        """Handle search text changes with debouncing"""
+        self.search_timer.stop()
+        self.search_timer.start(300)
+
+    def _do_email_search(self):
+        """Perform the actual account search in the hamburger menu"""
+        try:
+            search_text = self.email_search_bar.text().strip().lower()
+
+            for i in range(self.accounts_list.count()):
+                item = self.accounts_list.item(i)
+                if item:
+                    account_text = item.text().lower()
+
+                    if not search_text or search_text in account_text:
+                        item.setHidden(False)
+                    else:
+                        item.setHidden(True)
+
+            log.debug(f"Filtered accounts list for search: '{search_text}'")
+
+        except Exception as e:
+            log.error(f"Error during account search: {e}")
+
+    def _filter_current_tab_emails(self, search_text: str):
+        """Filter emails in the current tab based on search text - DEPRECATED"""
+        pass
+
+    def _on_tab_changed(self, index):
+        """Handle tab changes - clear search when switching tabs"""
+        if hasattr(self, 'email_search_bar'):
+            self.email_search_bar.clear()
+            self._show_all_accounts()
+
+    def _show_all_accounts(self):
+        """Show all accounts in the accounts list"""
+        try:
+            for i in range(self.accounts_list.count()):
+                item = self.accounts_list.item(i)
+                if item:
+                    item.setHidden(False)
+        except Exception as e:
+            log.error(f"Error showing all accounts: {e}")
 
 
 if __name__ == "__main__":
