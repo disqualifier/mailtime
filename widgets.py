@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 from utils import load_svg_icon
-from workers import IMAPWorker, FileIOWorker, FolderWorker
+from workers import IMAPWorker, FileIOWorker, FolderWorker, IMAPDeleteWorker
 
 log = logging.getLogger('MailClient')
 
@@ -240,18 +240,20 @@ class MailTab(QWidget):
         """)
 
         self.email_table = QTableWidget()
-        self.email_table.setColumnCount(4)
-        self.email_table.setHorizontalHeaderLabels(["ID", "Date", "From", "Subject"])
+        self.email_table.setColumnCount(5)
+        self.email_table.setHorizontalHeaderLabels(["ID", "Date", "From", "Subject", "Delete"])
 
         header = self.email_table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
 
         self.email_table.setColumnWidth(0, 50)
         self.email_table.setColumnWidth(1, 160)
         self.email_table.setColumnWidth(2, 250)
+        self.email_table.setColumnWidth(4, 60)
         self.email_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.email_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.email_table.itemSelectionChanged.connect(self._on_email_selected)
@@ -469,7 +471,159 @@ class MailTab(QWidget):
                 subject_text += f" [{email['folder']}]"
             self.email_table.setItem(row, 3, QTableWidgetItem(subject_text))
 
+            # Add delete button
+            delete_btn = QPushButton()
+            delete_btn.setIcon(load_svg_icon("trash", 14, "#ff4444"))
+            delete_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: transparent;
+                    border: none;
+                    padding: 4px;
+                    margin: 2px;
+                }
+                QPushButton:hover {
+                    background-color: transparent;
+                }
+                QPushButton:pressed {
+                    background-color: transparent;
+                }
+            """)
+
+            # Handle icon color change on hover manually
+            def on_enter(event):
+                delete_btn.setIcon(load_svg_icon("trash", 14, "#cc3333"))
+
+            def on_leave(event):
+                delete_btn.setIcon(load_svg_icon("trash", 14, "#ff4444"))
+
+            delete_btn.enterEvent = on_enter
+            delete_btn.leaveEvent = on_leave
+            delete_btn.setToolTip(f"Delete this email")
+            delete_btn.clicked.connect(lambda checked, email_data=email: self._delete_email(email_data))
+            self.email_table.setCellWidget(row, 4, delete_btn)
+
         log.info(f"Displayed {len(filtered_emails)} emails for folder '{folder_name}'")
+
+    def _delete_email(self, email_data):
+        """Delete a specific email from the inbox and cache"""
+        from PyQt6.QtWidgets import QMessageBox
+
+        # Check if we're connected/synced
+        if not self.is_connected:
+            reply = QMessageBox.question(
+                self,
+                "Sync Required",
+                f"You need to be synced to delete emails from the server.\n\nWould you like to sync now and then delete this email?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                # Store email data for deletion after sync
+                self._pending_delete_email = email_data
+                self.sync_folder()
+                return
+            else:
+                return
+
+        # Show confirmation dialog
+        reply = QMessageBox.question(
+            self,
+            "Delete Email",
+            f"Are you sure you want to delete this email from both the server and locally?\n\nFrom: {email_data.get('from', 'Unknown')}\nSubject: {email_data.get('subject', 'No Subject')}\n\nThis action cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        try:
+            email_id = email_data.get('id', '')
+            email_folder = email_data.get('folder', 'INBOX')
+
+            # First delete from IMAP server
+            if self.account.get("use_default", True):
+                host = self.default_imap.get("host", "")
+                port = self.default_imap.get("port", 993)
+                use_ssl = self.default_imap.get("use_ssl", True)
+            else:
+                host = self.account.get("host", "")
+                port = self.account.get("port", 993)
+                use_ssl = self.account.get("use_ssl", True)
+
+            if not host:
+                QMessageBox.warning(self, "Delete Error", "No IMAP host configured, cannot delete from server")
+                return
+
+            # Show loading cursor
+            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+
+            # Start IMAP deletion
+            self.delete_worker = IMAPDeleteWorker(
+                self.account["email"],
+                self.account["password"],
+                host,
+                port,
+                use_ssl,
+                email_folder,
+                email_id
+            )
+            self.delete_worker.deleted.connect(lambda success, msg: self._on_email_deleted_from_server(success, msg, email_data))
+            self.delete_worker.error.connect(lambda error: self._on_email_delete_error(error, email_data))
+            self.delete_worker.finished.connect(lambda: self._restore_cursor())
+            self.delete_worker.start()
+
+            log.info(f"Starting IMAP deletion for email: {email_data.get('subject', 'No Subject')}")
+
+        except Exception as e:
+            QApplication.restoreOverrideCursor()  # Restore cursor on error
+            log.error(f"Error starting email deletion: {e}")
+            QMessageBox.critical(self, "Delete Error", f"Failed to start email deletion: {str(e)}")
+
+    def _on_email_deleted_from_server(self, success, message, email_data):
+        """Handle successful server deletion"""
+        if success:
+            # Clear entire cache since IMAP renumbers all emails after delete/expunge
+            log.info(f"Email deleted from server and locally: {email_data.get('subject', 'No Subject')}")
+            log.info("Clearing cache and resyncing due to IMAP email renumbering")
+
+            # Clear all local data
+            self.all_emails = []
+            self.emails = []
+
+            # Clear table
+            self.email_table.setRowCount(0)
+
+            # Clear preview
+            if hasattr(self, 'current_email'):
+                self.current_email = None
+                self.preview_text.clear()
+                self.preview_html.clear()
+
+            # Clear cache file
+            self._save_cached_emails()
+
+            # Trigger fresh sync to get correct email IDs from server
+            log.info("Starting fresh sync after delete to update email IDs")
+            self.sync_folder()
+
+    def _on_email_delete_error(self, error_msg, email_data):
+        """Handle email deletion errors"""
+        QApplication.restoreOverrideCursor()  # Restore cursor on error
+        log.error(f"Error deleting email from server: {error_msg}")
+        QMessageBox.critical(self, "Server Delete Error", f"Failed to delete email from server:\n\n{error_msg}\n\nThe email was not deleted.")
+
+    def _restore_cursor(self):
+        """Restore normal cursor after async operation"""
+        QApplication.restoreOverrideCursor()
+
+    def _check_pending_delete(self):
+        """Check if there's a pending email deletion after sync"""
+        if hasattr(self, '_pending_delete_email') and self._pending_delete_email:
+            email_to_delete = self._pending_delete_email
+            self._pending_delete_email = None
+            log.info("Processing pending email deletion after sync")
+            self._delete_email(email_to_delete)
 
     def _get_cache_file_path(self):
         """Get the cache file path for this account"""
@@ -635,6 +789,9 @@ class MailTab(QWidget):
             self._reset_folder_button()
             return
 
+        # Show loading cursor
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+
         self.folder_worker = FolderWorker(
             self.account["email"],
             self.account["password"],
@@ -644,6 +801,8 @@ class MailTab(QWidget):
         )
         self.folder_worker.folders_fetched.connect(self._on_folders_loaded)
         self.folder_worker.finished.connect(self._reset_folder_button)
+        self.folder_worker.finished.connect(self._restore_cursor)
+        self.folder_worker.error.connect(lambda: self._restore_cursor())
         self.folder_worker.start()
 
     def _reset_folder_button(self):
@@ -862,6 +1021,9 @@ class MailTab(QWidget):
             self._enable_sync_buttons()
             return
 
+        # Show loading cursor
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+
         self.worker = IMAPWorker(
             self.account["email"],
             self.account["password"],
@@ -873,6 +1035,8 @@ class MailTab(QWidget):
         self.worker.finished.connect(self._on_emails_loaded)
         self.worker.error.connect(self._on_error)
         self.worker.connection_status.connect(self._update_connection_status)
+        self.worker.finished.connect(self._restore_cursor)
+        self.worker.error.connect(lambda: self._restore_cursor())
         self.worker.start()
 
     def _update_connection_status(self, status):
@@ -907,8 +1071,17 @@ class MailTab(QWidget):
         if not hasattr(self, 'all_emails'):
             self.all_emails = []
 
-        existing_ids = {email['id'] for email in self.all_emails}
-        new_emails = [email for email in emails if email['id'] not in existing_ids]
+        # Create unique keys using id + subject + from for better deduplication
+        existing_keys = {(email['id'], email.get('subject', ''), email.get('from', '')) for email in self.all_emails}
+        new_emails = []
+
+        for email in emails:
+            email_key = (email['id'], email.get('subject', ''), email.get('from', ''))
+            if email_key not in existing_keys:
+                new_emails.append(email)
+                existing_keys.add(email_key)
+            else:
+                log.debug(f"Skipping duplicate email: ID {email['id']}, Subject: {email.get('subject', 'No Subject')[:50]}")
         self.all_emails.extend(new_emails)
 
         log.info(f"Added {len(new_emails)} new emails to storage, total stored: {len(self.all_emails)}")
@@ -925,6 +1098,9 @@ class MailTab(QWidget):
         self._enable_sync_buttons()
         self.parent_window._update_accounts_list()
         log.info("Email storage and filtering updated successfully")
+
+        # Check for pending email deletion after sync
+        self._check_pending_delete()
 
     def copy_email_to_clipboard(self, item):
         """Copy email content to clipboard when clicked"""
@@ -1225,15 +1401,6 @@ class MailTab(QWidget):
         self._enable_sync_buttons()
         self.parent_window._update_accounts_list()
 
-    def clear_cache(self):
-        """Clear the email cache for this account"""
-        self.all_emails = []
-        self.email_table.setRowCount(0)
-        self.email_content.clear()
-        cache_file = self._get_cache_file_path()
-        if cache_file.exists():
-            cache_file.unlink()
-        log.info(f"Cleared cache for {self.account.get('email')}")
 
     def edit_account(self):
         """Open account dialog to edit account settings"""
@@ -1246,3 +1413,58 @@ class MailTab(QWidget):
             if hasattr(self.parent_window, '_save_config'):
                 self.parent_window._save_config()
             log.info(f"Updated account settings for {self.account.get('email')}")
+
+    def filter_emails(self, search_text: str):
+        """Filter displayed emails based on search text"""
+        try:
+            if not hasattr(self, 'all_emails') or not self.all_emails:
+                log.debug("No emails to filter")
+                return
+
+            search_text = search_text.strip().lower()
+
+            if not search_text:
+                # Show all emails when search is empty - use existing logic
+                if hasattr(self, '_filter_emails_by_folder'):
+                    self._filter_emails_by_folder()
+                else:
+                    # Fallback: show all emails for current folder
+                    current_folder = getattr(self, 'current_folder', 'Inbox')
+                    self.emails = [email for email in self.all_emails if email.get('folder', 'INBOX') == current_folder]
+                    self._populate_table()
+                return
+
+            # Filter emails by search text (matches subject, from, or body)
+            filtered_emails = []
+            for email in self.all_emails:
+                if not isinstance(email, dict):
+                    continue
+
+                try:
+                    # Search in subject, from, and body text - safe access
+                    subject = str(email.get('subject', '')).lower()
+                    from_addr = str(email.get('from', '')).lower()
+                    body_text = str(email.get('body_text', '')).lower()
+
+                    if search_text in subject or search_text in from_addr or search_text in body_text:
+                        filtered_emails.append(email)
+
+                except Exception as e:
+                    log.debug(f"Error processing email during search: {e}")
+                    continue
+
+            # Update current emails and redisplay
+            current_folder = getattr(self, 'current_folder', 'Inbox')
+            self.emails = [email for email in filtered_emails if email.get('folder', 'INBOX') == current_folder]
+
+            # Safely populate table
+            if hasattr(self, 'email_table') and hasattr(self, '_populate_table'):
+                self._populate_table()
+
+            log.debug(f"Search complete: {len(self.emails)} results for '{search_text}'")
+
+        except Exception as e:
+            log.error(f"Critical error in filter_emails: {e}")
+            # Emergency fallback - just clear the table rather than crash
+            if hasattr(self, 'email_table'):
+                self.email_table.setRowCount(0)

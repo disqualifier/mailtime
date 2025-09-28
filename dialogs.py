@@ -1,9 +1,10 @@
 import logging
+import webbrowser
 from typing import Optional, Dict
 from PyQt6.QtWidgets import (
     QDialog, QLineEdit, QLabel, QFormLayout, QCheckBox, QVBoxLayout, QHBoxLayout,
     QPushButton, QTableWidget, QTableWidgetItem, QHeaderView, QWidget, QSplitter,
-    QTextEdit, QApplication
+    QTextEdit, QApplication, QScrollArea
 )
 from PyQt6.QtCore import Qt
 from utils import load_svg_icon
@@ -620,3 +621,130 @@ class EmailSearchDialog(QDialog):
         preview_text += email.get('body_text', 'No content available')
 
         self.preview_content.setPlainText(preview_text)
+
+
+class UpdateDialog(QDialog):
+    def __init__(self, current_version: str, latest_version: str, download_url: str, release_notes: str, parent=None):
+        super().__init__(parent)
+        self.download_url = download_url
+        self.setWindowTitle("Update Available")
+        self.setMinimumSize(500, 400)
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #1a1a1a;
+            }
+            QLabel {
+                color: #e0e0e0;
+                font-size: 13px;
+            }
+            QTextEdit {
+                background-color: #2a2a2a;
+                color: #e0e0e0;
+                border: 1px solid #3a3a3a;
+                border-radius: 4px;
+                padding: 8px;
+                font-size: 12px;
+                font-family: monospace;
+            }
+            QPushButton {
+                background-color: #824ffb;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 10px 20px;
+                font-size: 13px;
+                font-weight: bold;
+                margin: 4px;
+            }
+            QPushButton:hover {
+                background-color: #9366ff;
+            }
+            QPushButton:pressed {
+                background-color: #6b3dd9;
+            }
+            QScrollArea {
+                border: none;
+                background-color: transparent;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(16)
+
+        # Header with update icon and title
+        header_layout = QHBoxLayout()
+
+        # Update icon (using external-link icon)
+        icon_label = QLabel()
+        icon_label.setPixmap(load_svg_icon("external-link", 32, "#4CAF50").pixmap(32, 32))
+        icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        header_layout.addWidget(icon_label)
+
+        # Title and version info
+        title_layout = QVBoxLayout()
+        title_label = QLabel("Update Available!")
+        title_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #4CAF50;")
+        title_layout.addWidget(title_label)
+
+        version_label = QLabel(f"A new version of mailtime is available.\nCurrent: v{current_version}  →  Latest: v{latest_version}")
+        version_label.setStyleSheet("font-size: 13px; color: #e0e0e0;")
+        title_layout.addWidget(version_label)
+
+        header_layout.addLayout(title_layout)
+        header_layout.addStretch()
+        layout.addLayout(header_layout)
+
+        # Release notes section
+        notes_label = QLabel("What's New:")
+        notes_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #e0e0e0; margin-top: 10px;")
+        layout.addWidget(notes_label)
+
+        # Scrollable release notes
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setMaximumHeight(200)
+
+        notes_text = QTextEdit()
+        notes_text.setPlainText(release_notes)
+        notes_text.setReadOnly(True)
+        scroll.setWidget(notes_text)
+        layout.addWidget(scroll)
+
+        # Button layout
+        button_layout = QHBoxLayout()
+
+        # Later button
+        later_btn = QPushButton("Remind Me Later")
+        later_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #3a3a3a;
+                color: #e0e0e0;
+            }
+            QPushButton:hover {
+                background-color: #4a4a4a;
+            }
+        """)
+        later_btn.clicked.connect(self.reject)
+
+        # Download button
+        download_btn = QPushButton("Download Update")
+        download_btn.setIcon(load_svg_icon("external-link", 16, "#ffffff"))
+        download_btn.clicked.connect(self._open_download_page)
+        download_btn.setDefault(True)
+
+        button_layout.addWidget(later_btn)
+        button_layout.addStretch()
+        button_layout.addWidget(download_btn)
+        layout.addLayout(button_layout)
+
+    def _open_download_page(self):
+        """Open the download page in default browser"""
+        try:
+            webbrowser.open(self.download_url)
+            log.info(f"Opened download page: {self.download_url}")
+            self.accept()
+        except Exception as e:
+            log.error(f"Failed to open download page: {e}")
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "Browser Error", f"Could not open download page.\n\nPlease visit:\n{self.download_url}")
+            self.accept()
